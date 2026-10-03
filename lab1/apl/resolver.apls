@@ -1,0 +1,242 @@
+#!/usr/bin/env dyalogscript
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ resolver.apls
+⍝ A mini nslookup written in pure APL: prints every IPv4 and IPv6 address of a host name.
+⍝ It resolves names on its own with this steps:
+⍝   1. it looks for the name in /etc/hosts
+⍝   2. if it is not there, it asks the DNS servers listed in /etc/resolv.conf inorder
+⍝ There is no getaddrinfo here :( you need ot build the DNS query bytes handmade
+⍝ send them over TCP to port 53 of the DNS server and decode the reply bytes
+⍝ Usage: dyalogscript resolver.apls google.com
+⍝ Compare with: dig www.usb.ve   and   dig AAAA www.usb.ve
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                          ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+'Conga' ⎕CY 'conga'       ⍝ copy the networking library conga
+DRC←Conga.Init ''         ⍝ start conga. Vamo' negro pa la conga
+⎕IO←0                     ⍝ index origin 0 like in C
+                          ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- helpers ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                                           ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+U16←{256 256⊤⍵}                                            ⍝ 16-bit number big endian same as htons
+SkipName←{l←⍺[⍵] ⋄ l=0:⍵+1 ⋄ l≥192:⍵+2 ⋄ ⍺ ∇ ⍵+1+l}        ⍝ msg SkipName pos after a DNS name
+IPv4←{1↓∊'.',¨⍕¨⍵}                                         ⍝ 4 bytes "a.b.c.d"
+Hex←{d←16 16 16 16⊤⍵ ⋄ '0123456789abcdef'[(3⌊+/∧\0=d)↓d]}  ⍝ 0..65535 hex without leading zeros
+Join←{1↓∊':',¨⍵}                                           ⍝ list of strings -> "a:b:c"
+Words←{(~⍵∊' ',⎕UCS 9)⊆⍵}                                  ⍝ split a line into words (spaces or tabs)
+                                                           ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- error messages ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                          
+⍝ DNS response code text
+RcodeText←{⍵=3:'name does not exist (NXDOMAIN)' ⋄ ⍵=2:'server failure (SERVFAIL)' ⋄ ⍵=5:'query refused (REFUSED)' ⋄ 'error code ',⍕⍵}
+
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- argv processing ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                     ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ r←Args;all;m                       ⍝ arguments that come after the script name
+ all←2 ⎕NQ '.' 'GetCommandLineArgs'  ⍝ the whole command line, as a list of strings
+ m←{'.apls'≡¯5↑⍵}¨all                ⍝ 1 where the element is the path of the script
+ :If ~∨/m                            ⍝ the script path was not found
+     r←⍬                             ⍝ an empty list: no arguments
+ :Else                               ⍝ the script path was found
+     r←(1+⊃⍸m)↓all                   ⍝ everything after the script path
+ :EndIf                              ⍝ close of the if
+∇
+                                     ⍝ DONT COMMENT UP (it crashes for the close of the func)
+                                     ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- step 1: /etc/hosts ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ found←HostsFile name;lines;line;w;ip  ⍝ print the addresses of name listed in /etc/hosts
+ found←0                                ⍝ 0 = not found yet
+ :Trap 0                                ⍝ if the file cannot be read, just say "not found"
+     lines←⊃⎕NGET '/etc/hosts' 1        ⍝ the file as a list of lines
+ :Else                                  ⍝ reading failed
+     :Return                            ⍝ leave with found = 0
+ :EndTrap                               ⍝ close of the trap
+ :For line :In lines                    ⍝ lines like "127.0.0.1 localhost localhost.localdomain"
+     line←(∧\line≠'#')/line             ⍝ ignore everything after a '#' (comments)
+     w←Words line                       ⍝ first word = IP, the rest = names
+     :If (2≤≢w)∧(⊂⎕C name)∊⎕C 1↓w       ⍝ our name is one of the names (ignoring case)
+         ip←⊃w                          ⍝ the IP of that line
+         :If ':'∊ip                     ⍝ IPv6 addresses contain ':'
+             ⎕←'IPv6 ',ip               ⍝ print it as IPv6
+         :Else                          ⍝ otherwise it is IPv4
+             ⎕←'IPv4 ',ip               ⍝ print it as IPv4
+         :EndIf                         ⍝ close of the if
+         found←1                        ⍝ we found at least one address
+     :EndIf                             ⍝ close of the if
+ :EndFor                                ⍝ close of the for
+∇
+                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- step 2: /etc/resolv.conf ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ list←NameServers;lines;line;w         ⍝ every "nameserver" line of /etc/resolv.conf, in order
+ list←⍬                                 ⍝ start with an emtpy list
+ :Trap 0                                ⍝ if the file cannot be read, keep theempty list
+     lines←⊃⎕NGET '/etc/resolv.conf' 1  ⍝ the file as a list of lines
+     :For line :In lines                ⍝ look at each line
+         w←Words line                   ⍝ example "nameserver" "127.0.0.53"
+         :If ('nameserver'≡⊃w)∧2≤≢w     ⍝ it is a nameserver line
+             list,←⊂1⊃w                 ⍝ add the second word (the server's IP) to the list
+         :EndIf                         ⍝ close of the if
+     :EndFor                            ⍝ next line
+ :EndTrap                               ⍝ close of the trap
+ :If 0=≢list                            ⍝ no nameserver lines at all
+     list←,⊂'127.0.0.1'                 ⍝ same default as the C library: this machine
+ :EndIf                                 ⍝ close of the if
+∇
+                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- step 3: DNS Query ---------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                         ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ msg←name BuildQuery type;labels;qname  ⍝ query for name; type 1 = A (IPv4), 28 = AAAA (IPv6)
+ labels←'.'(≠⊆⊢)name                     ⍝ split '.'
+ qname←(∊{(≢⍵),⎕UCS ⍵}¨labels),0         ⍝ each label as length byte + its bytes, then a 0 byte
+ msg←(U16 ?65536)                        ⍝ ID is a random 16-bit number
+ msg,←1 0                                ⍝ flags
+ msg,←0 1,0 0,0 0,0 0                    ⍝ 1 question, 0 answers, 0 authority, 0 additional
+ msg,←qname,(U16 type),U16 1             ⍝ the question: name, type, class 1
+∇
+                                         ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ------- step 4: Query over TCP ---------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ reply←server Query msg;r;rc;c;obj;evt;data;buf;tries  ⍝ reply bytes, or ⍬ if this server failed
+ reply←⍬                                                ⍝ empty until we get an answer
+ r←DRC.Clt '' server 53 'Raw'                           ⍝ connect to port 53 in Raw mode
+ (rc c)←2↑r                                             ⍝ rc = 0 if OK; c = name of the con
+ :If rc≠0                                               ⍝ could not connect to this server
+     :Return                                            ⍝ leave with an empty reply: main tries
+ :EndIf                                                 ⍝ the next server. Close of the if
+ rc←⊃DRC.Send c ((U16≢msg),msg)                         ⍝ over TCP, DNS messages start with 2 bytes
+ buf←⍬                                                  ⍝ here we collect the bytes that arrive
+ tries←0                                                ⍝ how many 100 ms waits without data
+ :While tries<50                                        ⍝ give up after about 5 seconds
+     (rc obj evt data)←4↑DRC.Wait c 100                 ⍝ wait up to 100 ms for an event
+     :If rc=0                                           ⍝ something happened
+         :If (⊂evt)∊'Block' 'BlockLast'                 ⍝ data arrived
+             buf,←256|data                              ⍝ append the bytes that arrived
+         :EndIf                                         ⍝ close of the if
+     :ElseIf rc=100                                     ⍝ 100 = timeout, nothing arrived yet
+         tries+←1                                       ⍝ count one more wait
+     :Else                                              ⍝ the connection was closed or failed
+         :Leave                                         ⍝ stop waiting
+     :EndIf                                             ⍝ close of the if
+     :If (2≤≢buf)∧(≢buf)≥2+256⊥2↑buf                    ⍝ TCP is a byte stream: stop when
+         :Leave                                         ⍝ we have the full reply
+     :EndIf                                             ⍝ close of the if
+ :EndWhile                                              ⍝ keep waiting
+ {}DRC.Close c                                          ⍝ close the TCP connection (sent FIN)
+ reply←2↓buf                                            ⍝ drop the 2-byte lenght
+∇
+                                                        ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ------ step 5: format ans ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                            ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ txt←IPv6 bytes;g;h;z;runs;best;n          ⍝ 16 bytes is an IPv6, longest run of zeros as "::"
+ g←256⊥⍉8 2⍴bytes                           ⍝ 8 groups of 16 bits
+ h←Hex¨g                                    ⍝ each group in hexdec
+ z←0=g                                      ⍝ 1 where the group is zero
+ runs←(⊂z){+/∧\⍵↓⍺}¨⍳8                      ⍝ zero groups in a row starting at each position
+ best←⊃⍒runs                                ⍝ where the longest run starts
+ n←runs[best]                               ⍝ how long it is
+ :If n<2                                    ⍝ no run worth compressing
+     txt←Join h                             ⍝ write all 8 groups
+ :Else                                      ⍝ there is a run of 2 or more zero groups
+     txt←(Join best↑h),'::',Join(best+n)↓h  ⍝ groups before "::" groups after
+ :EndIf                                     ⍝ close of the if
+∇
+                                            ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                    ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ Show reply;qd;an;p;i;t;len;rdata  ⍝ print the A and AAAA records of a reply
+ qd←256⊥reply[4 5]                  ⍝ number of questions
+ an←256⊥reply[6 7]                  ⍝ number of answers
+ p←12                               ⍝ the header is 12 bytes long
+ :For i :In ⍳qd                     ⍝ skip each question
+     p←4+reply SkipName p           ⍝ name + type + class
+ :EndFor                            ⍝ next question
+ :For i :In ⍳an                     ⍝ walk each answer
+     p←reply SkipName p             ⍝ the answers name
+     t←256⊥reply[p+0 1]             ⍝ record type
+     len←256⊥reply[p+8 9]           ⍝ data length (after type, class and TTL)
+     rdata←reply[p+10+⍳len]         ⍝ the record data
+     p←p+10+len                     ⍝ position of the next answer
+     :If (t=1)∧len=4                ⍝ A record is an IPv4 address
+         ⎕←'IPv4 ',IPv4 rdata       ⍝ binary to text
+     :ElseIf (t=28)∧len=16          ⍝ AAAA record is an IPv6 address
+         ⎕←'IPv6 ',IPv6 rdata       ⍝ binary to text
+     :EndIf                         ⍝ other types (e.g. CNAME = 5) are skipped
+ :EndFor                            ⍝ next answer
+∇
+                                    ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ ---------- main ----------
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+                                                       ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+∇ Main;args;name;server;r4;r6;rcode                    ⍝ the program starts here
+ args←Args                                             ⍝ the command line arguments
+ :If 1≠≢args                                           ⍝ we need exactly one: the host name
+     ⎕←'usage: dyalogscript resolver.apls <hostname>'  ⍝ explain how to use it
+     ⎕OFF 1                                            ⍝ exit with error code 1
+ :EndIf                                                ⍝ close of the if
+ name←⊃args                                            ⍝ the name to resolve
+ :If HostsFile name                                    ⍝ step 1 if found in /etc/hosts
+     :Return                                           ⍝ done, just like getaddrinfo
+ :EndIf                                                ⍝ close of the if
+ r4←⍬                                                  ⍝ no reply yet
+ :For server :In NameServers                           ⍝ step 2 try each DNS server in order
+     r4←server Query name BuildQuery 1                 ⍝ steps 3-4 ask for IPv4 addresses
+     :If 12≤≢r4                                        ⍝ this server answered
+         :Leave                                        ⍝ keep using this server
+     :EndIf                                            ⍝ close of the if
+ :EndFor                                               ⍝ try the next server
+ :If 12>≢r4                                            ⍝ no server answered
+     ⎕←name,': no DNS server answered'                 ⍝ explain the error
+     ⎕OFF 1                                            ⍝ exit with error code 1
+ :EndIf                                                ⍝ close of the if
+ rcode←16|r4[3]                                        ⍝ low 4 bits of byte 3 = response code
+ :If rcode≠0                                           ⍝ the server reported an error
+     ⎕←name,': ',RcodeText rcode                       ⍝ e.g. "name does not exist (NXDOMAIN)"
+     ⎕OFF 1                                            ⍝ exit with error code 1
+ :EndIf                                                ⍝ close of the if
+ r6←server Query name BuildQuery 28                    ⍝ same server, now ask for IPv6 addresses
+ Show r4                                               ⍝ step 5: print the IPv4 addresses
+ :If 12≤≢r6                                            ⍝ the IPv6 query got a reply
+     Show r6                                           ⍝ print the IPv6 addresses
+ :EndIf                                                ⍝ close of the if
+∇
+                                                       ⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+Main
+⎕OFF
