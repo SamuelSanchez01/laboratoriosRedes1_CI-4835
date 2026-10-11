@@ -1,0 +1,27 @@
+services:
+  irc-server:
+    image: inspircd/inspircd-docker:latest
+    container_name: irc_server
+    ports:
+      - "6667:6667"
+      - "6697:6697"
+    volumes:
+      - ./inspircd/conf:/inspircd/conf:Z
+    restart: always
+
+  irc-webclient:
+    image: thelounge/thelounge:latest
+    container_name: irc_webclient
+    ports:
+      - "9000:9000"
+    volumes:
+      # Cambiamos la ruta local por un volumen interno de Docker
+      - lounge-data:/var/opt/thelounge
+    depends_on:
+      - irc-server
+    restart: always
+
+# Declaramos el volumen al final del archivo
+volumes:
+  lounge-data:
+
